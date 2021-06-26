@@ -1,0 +1,295 @@
+---
+title: "Especies de primates en Costa Rica"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#### Estudiante: Katherine Trejos Porras
+#### Carné: C07869
+#### Tarea 03
+
+
+# Introducción
+En la presente tarea se abarcan temas en relación a cuatro tipos de primates que se encuentran en Costa Rica, así que en la primer parte se observará una tabla con datos de los primates, en la segunda parte se apreciará porcentajes de cómo se distribuye la cantidad de los primates y en la tercer parte se visualizará un mapa en relación a los datos.
+```{r carga-paquetes, message=FALSE}
+#Preparativos para el desarrollo de la tarea
+# carga paquetes
+library(dplyr)
+library(sf)
+library(DT)
+library(leaflet)
+library(plotly)
+library(raster)
+library(spData)
+
+```
+
+```{r carga, message=FALSE}
+# Carga de datos
+Primates <- 
+st_read("https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2021i-datos/main/gbif/primates-cr-registros.csv",
+ options = c(
+      "X_POSSIBLE_NAMES=decimalLongitude",
+      "Y_POSSIBLE_NAMES=decimalLatitude"
+    ),
+quiet = TRUE
+ )
+```
+
+```{r carga datos, message=FALSE, warning=FALSE}
+
+# Carga de la capa de cantones y provincias
+cantones <-
+  st_read(
+    "https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2021i-datos/main/ign/delimitacion-territorial-administrativa/cr_cantones_simp_wgs84.geojson",
+  quiet = TRUE
+    )
+
+provincias <-
+  st_read(
+    "https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2021i-datos/main/ign/delimitacion-territorial-administrativa/cr_provincias_simp_wgs84.geojson",
+    quiet = TRUE
+  )
+
+# Asignación de CRS 
+st_crs(Primates) = 4326
+st_crs(cantones) = 4326
+
+#Elementos de las especies en base al cantón y provincia
+Primates <-
+   Primates %>%
+   st_join(cantones["canton"])
+
+Primates <- 
+  Primates %>%
+  st_join(provincias["provincia"])
+
+# Datos frame para cada especie de primate
+
+Mono_ardilla <- Primates %>% 
+dplyr::select(species, canton, provincia, eventDate, decimalLongitude, decimalLatitude) %>%
+  filter(Primates$species == "Saimiri oerstedii")
+Mono_congo <- Primates %>% 
+dplyr::select(species, canton, provincia, eventDate, decimalLongitude, decimalLatitude) %>%
+  filter(Primates$species == "Alouatta palliata")
+
+Mono_cariblanca <- Primates %>% 
+dplyr::select(species, canton, provincia, eventDate, decimalLongitude, decimalLatitude) %>%
+  filter(Primates$species == "Cebus capucinus")
+   
+Mono_araña <- Primates %>% 
+dplyr::select(species, canton, provincia, eventDate, decimalLongitude, decimalLatitude) %>%
+  filter(Primates$species == "Ateles geoffroyi")
+
+# Obtención de la capa de altitud
+alti <- getData(
+  "worldclim",
+  var = "alt",
+  res = .5,
+  lon = -84,
+  lat = 10
+)
+  altitud <- 
+alti %>%
+  crop(provincias) %>%
+  mask(provincias)
+   
+```
+
+
+
+
+## Tabla de registros de presencia de los primates
+Se visuliza datos de las cuatro diefrentes especies de primates, datos como la familia, localización y fechas.
+```{r tabla-registros, message=FALSE}
+Primates %>%
+  st_drop_geometry() %>%
+  dplyr::select(family, species, stateProvince, canton, eventDate) %>%
+  datatable(
+    colnames = c("Familia", "Especie", "Provincia", "Canton", "Fecha"),
+    options = list(
+      searchHighlight = TRUE,
+      language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Spanish.json')
+    )
+  )
+```
+
+## Gráfico pastel de registros de las diferentes especies
+Se observa la disribución en porcentaje de las cuatro especies.
+```{r gráfico pastel, message=FALSE}
+num_especies <- c(1994, 453, 599, 1463)
+
+nomb_especies <- c("Alouatta palliata", "Saimiri oertedii", "Ateles geoffroyi", "Cebus capucinus")
+
+colors <- c('9999CC', 'CC9999', '99CCCC', '99CC99')
+
+fuente <- list(family = "Courier New",
+          size = 11, 
+          color = '000000')
+          
+ df_Primates <- data.frame(
+  "nomb_especies" = c("Mono Araña", "Mono Cariblanca", "Mono Congo", "Mono Ardilla"),
+   
+  "num_especies" = c(599, 1463, 1994, 453),
+  
+ colors <- c('9999CC', 'CC9999', '99CCCC', '99CC99')
+ )
+ 
+ Primates %>%
+  plot_ly(
+    labels = ~ nomb_especies,
+    values = ~ num_especies,
+    type = "pie",
+    marker = list(colors = colors,
+                  line =list(color = '000000', width = 0))) %>%
+   config(locale = "es") %>%
+layout(
+  title = "Porcentaje de los primates en el país",
+  font = fuente,
+ xaxis = list(
+    showgrid = FALSE,
+    zeroline = FALSE,
+    showticklabels = FALSE
+  ),
+  yaxis = list(
+    showgrid = FALSE,
+    zeroline = FALSE,
+    showticklabels = FALSE
+  )
+  )
+```
+
+
+## Mapa de las especies de primates que se localizan en el país
+```{r popups, message=FALSE}
+# Popups 
+pMono_araña <- paste0("<b>", "Especie: ","</b>",
+                     (Mono_araña$species), "<br>",
+                     "<b>", "Provincia: ","</b>",
+                     (Mono_araña$provincia), "<br>",
+                    "<b>", "canton: ", "</b>",
+                    (Mono_araña$canton), "<br>",
+                    "<b>", "Fecha: ","</b>",
+                    (Mono_araña$eventDate), "<br>",
+                    "<b>", "Coordenadas: ","</b>",
+                    (Mono_araña$decimalLongitude), 
+                    (Mono_araña$decimalLatitude)
+                    )
+pMono_ardilla <- paste0("<b>", "Especie: ","</b>",
+                     (Mono_ardilla$species), "<br>",
+                     "<b>", "Provincia: ","</b>",
+                     (Mono_ardilla$provincia), "<br>",
+                    "<b>", "canton: ", "</b>",
+                    (Mono_ardilla$canton), "<br>",
+                    "<b>", "Fecha: ","</b>",
+                    (Mono_ardilla$eventDate), "<br>",
+                    "<b>", "Coordenadas: ","</b>",
+                    (Mono_ardilla$decimalLongitude), 
+                    (Mono_ardilla$decimalLatitude)
+                    )
+pMono_congo <- paste0("<b>", "Especie: ","</b>",
+                     (Mono_congo$species), "<br>",
+                     "<b>", "Provincia: ","</b>",
+                     (Mono_congo$provincia), "<br>",
+                    "<b>", "canton: ", "</b>",
+                    (Mono_congo$canton), "<br>",
+                    "<b>", "Fecha: ","</b>",
+                    (Mono_congo$eventDate), "<br>",
+                    "<b>", "Coordenadas: ","</b>",
+                    (Mono_congo$decimalLongitude), 
+                    (Mono_congo$decimalLatitude)
+                    )
+pMono_cariblanca <- paste0("<b>", "Especie: ","</b>",
+                     (Mono_cariblanca$species), "<br>",
+                     "<b>", "Provincia: ","</b>",
+                     (Mono_cariblanca$provincia), "<br>",
+                    "<b>", "canton: ", "</b>",
+                    (Mono_cariblanca$canton), "<br>",
+                    "<b>", "Fecha: ","</b>",
+                    (Mono_congo$eventDate), "<br>",
+                    "<b>", "Coordenadas: ","</b>",
+                    (Mono_cariblanca$decimalLongitude), 
+                    (Mono_cariblanca$decimalLatitude)
+                    )
+```
+
+
+```{r colores del raster, message=FALSE}
+# Determinación de los colores del mapa raster
+rastercol <- colorNumeric(
+c("#996666", "#FFCC99", "#999966"),
+values(altitud),
+na.color = "transparent")
+```
+
+
+
+```{r mapa, message=FALSE}
+# Mapa de las especies de primates
+Primates %>%
+  leaflet() %>%
+  addProviderTiles(providers$OpenStreetMap.Mapnik, group = "OpenStreetMap") %>%
+  addProviderTiles(providers$Stamen.TonerLite, group = "Stamen Toner Lite") %>%
+  addProviderTiles(providers$Esri.WorldImagery, group = "Imágenes de ESRI") %>%
+  addRasterImage(
+    altitud, 
+    colors = rastercol, 
+    opacity = 0.8,
+    group = "Altitud"
+  ) %>%
+  addCircleMarkers(
+    data = Mono_araña,
+    stroke = F,
+    radius = 2,
+    fillColor = '#CCFFFF',
+    fillOpacity = 1,
+    popup = "pMono_araña",
+    group = "Ateles geoffroyi"
+  ) %>%
+  addCircleMarkers(
+    data = Mono_ardilla,
+    stroke = F,
+    radius = 2,
+    fillColor = '#FFFF99',
+    fillOpacity = 1,
+    popup = "pMono_ardilla",
+    group = "Saimiri oerstedii"
+  ) %>%
+  addCircleMarkers(
+    data = Mono_congo,
+    stroke = F,
+    radius = 2,
+    fillColor = '#666633',
+    fillOpacity = 1,
+    popup = "pMono_congo",
+    group = "Alouatta palliata"
+  ) %>%
+  addCircleMarkers(
+    data = Mono_cariblanca,
+    stroke = F,
+    radius = 2,
+    fillColor = '#C99CC00',
+    fillOpacity = 1,
+    popup = "pMono_cariblanca",
+    group = "Cebus capucinus"
+  ) %>%
+  addLayersControl(
+    baseGroups = c("OpenStreetMap", "Stamen Toner Lite", "Imágenes de ESRI"),
+    overlayGroups = c("Ateles geoffroyi","Cebus capucinus","Alouatta palliata","Saimiri oerstedii", "altitud")
+  ) %>%
+  addMiniMap(
+    tiles = providers$Stamen.OpenStreetMap.Mapnik,
+    position = "bottomleft",
+    toggleDisplay = TRUE
+  )
+```
+
+
+
+
+
+
+
+
